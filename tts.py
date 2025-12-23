@@ -1,27 +1,47 @@
 import asyncio
 import edge_tts
-from playsound import playsound
-import certifi
-import ssl
+import tempfile
+import os
 from aiohttp import TCPConnector
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-async def speak(text, voice="fa-IR-FaridNeural"):
-    # SSL context برای حل مشکل certificate
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-    connector = TCPConnector(ssl=ssl_context)
-    
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "fa-IR-FaridNeural"
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+async def speak(text: str, voice: str = "fa-IR-FaridNeural") -> str:
+    connector = TCPConnector(ssl=False)
+
     communicate = edge_tts.Communicate(
         text,
         voice,
         connector=connector
     )
-    await communicate.save("output.mp3")
+    filename = tempfile.mktemp(suffix=".mp3")
+    await communicate.save(filename)
+    return filename
 
-# متن تست
-text = "سلام من مهدی کوشکی هستم خالق این چت بات"
+@app.post("/tts")
+async def tts_endpoint(request: TTSRequest):
+    try:
+        filename = await speak(request.text, request.voice)
+        return FileResponse(path=filename, media_type="audio/mpeg", filename="output.mp3")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-# اجرا
-asyncio.run(speak(text))
-
-# پخش صدا
-playsound("output.mp3")
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
